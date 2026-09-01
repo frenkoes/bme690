@@ -202,15 +202,17 @@ pub(crate) fn encode_res_heat(
     ambient_temp_c: i8,
     calib: &CalibrationData,
 ) -> u8 {
-    let target_temp_c = target_temp_c.min(400) as i32;
+    let target_temp_c = target_temp_c.min(400) as i64;
 
-    let var1 = ((ambient_temp_c as i32 * calib.par_g3 as i32) / 1000) * 256;
-    let var2 = (calib.par_g1 as i32 + 784)
-        * (((calib.par_g2 as i32 + 154_009) * target_temp_c * 5 / 100) + 3_276_800)
+    // Widened to i64 to match the reference driver, which relies on a `ULL`
+    // literal to force 64-bit arithmetic here and avoid i32 overflow.
+    let var1 = ((ambient_temp_c as i64 * calib.par_g3 as i64) / 1000) * 256;
+    let var2 = (calib.par_g1 as i64 + 784)
+        * (((calib.par_g2 as i64 + 154_009) * target_temp_c * 5 / 100) + 3_276_800)
         / 10;
     let var3 = var1 + (var2 >> 1);
-    let var4 = var3 / (calib.res_heat_range as i32 + 4);
-    let var5 = (131 * calib.res_heat_val as i32) + 65536;
+    let var4 = var3 / (calib.res_heat_range as i64 + 4);
+    let var5 = (131 * calib.res_heat_val as i64) + 65536;
     let heatr_res_x100 = ((var4 / var5) - 250) * 34;
 
     ((heatr_res_x100 + 50) / 100) as u8
