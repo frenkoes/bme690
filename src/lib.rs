@@ -150,6 +150,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct SensorData {
     /// Contains new_data, gasm_valid & heat_stab
     pub status: u8,
