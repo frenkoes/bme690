@@ -1,0 +1,474 @@
+device Bme690 {
+    register-address-type: u8,
+    default-byte-order: BE,
+    default-access: RW,
+
+    /// Oversampling setting shared by temperature, pressure and humidity.
+    enum Oversampling -> uint {
+        /// Measurement is skipped.
+        None: 0,
+        X1: 1,
+        X2: 2,
+        X4: 3,
+        X8: 4,
+        X16: default 5,
+    },
+
+    /// IIR filter coefficient applied to temperature and pressure.
+    enum Filter -> uint {
+        Off: 0,
+        Coefficient2: 1,
+        Coefficient4: 2,
+        Coefficient8: 3,
+        Coefficient16: 4,
+        Coefficient32: 5,
+        Coefficient64: 6,
+        Coefficient128: 7,
+    },
+
+    /// Sensor power/operating mode.
+    enum Mode -> uint {
+        Sleep: 0,
+        Forced: 1,
+        Parallel: 2,
+        Sequential: 3,
+    },
+
+    /// Gas sensor variant reported by the `variant_id` register.
+    enum VariantId -> uint {
+        Low: 0,
+        High: 1,
+        Bme690High: 2,
+        Unknown: catch-all _,
+    },
+
+    // --- Identification & reset -------------------------------------------
+
+    /// Chip identifier, expected to read back as `0x61`.
+    register ChipId {
+        address: 0xD0,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0,
+        },
+    },
+    /// Gas sensor variant of this device.
+    register VariantIdReg {
+        address: 0xF0,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0 -> _ as VariantId,
+        },
+    },
+    /// Writing `0xB6` performs a full soft reset of the device.
+    register SoftReset {
+        address: 0xE0,
+        access: WO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field cmd 7:0,
+        },
+    },
+
+    // --- Configuration ------------------------------------------------------
+
+    /// Humidity oversampling configuration.
+    register CtrlHum {
+        address: 0x72,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field osrs-h 2:0 -> _ as Oversampling,
+        },
+    },
+    /// Heater control and gas conversion configuration.
+    register CtrlGas0 {
+        address: 0x70,
+        fields: fieldset _ {
+            size-bytes: 1,
+            /// Set to disable the gas sensor heater.
+            field heat-off 3,
+        },
+    },
+    /// Gas measurement enable and conversion count configuration.
+    register CtrlGas1 {
+        address: 0x71,
+        fields: fieldset _ {
+            size-bytes: 1,
+            /// Number of the heater profile (0-9) used for the next conversion.
+            field nb-conv 3:0,
+            /// Enables gas measurement using the heater profile in `nb_conv`.
+            field run-gas 5,
+            /// Selects the "no standby" ODR option together with `Config::odr`.
+            field odr-3 7,
+        },
+    },
+    /// Temperature/pressure oversampling and power mode configuration.
+    register CtrlMeas {
+        address: 0x74,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field mode 1:0 -> _ as Mode,
+            field osrs-p 4:2 -> _ as Oversampling,
+            field osrs-t 7:5 -> _ as Oversampling,
+        },
+    },
+    /// IIR filter configuration.
+    register Config {
+        address: 0x75,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field filter 4:2 -> _ as Filter,
+        },
+    },
+
+    // --- Measurement status & data ------------------------------------------
+
+    /// Measurement status for the field-0 data set.
+    register EasStatus0 {
+        address: 0x1D,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field gas-meas-index 3:0,
+            field measuring 5,
+            field gas-measuring 6,
+            field new-data 7,
+        },
+    },
+    /// Sub-measurement index of the field-0 data set.
+    register MeasIndex {
+        address: 0x1E,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0,
+        },
+    },
+    /// Raw (uncompensated) pressure ADC reading.
+    register Pressure {
+        address: 0x1F,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 3,
+            field adc-pres 23:0,
+        },
+    },
+    /// Raw (uncompensated) temperature ADC reading.
+    register Temperature {
+        address: 0x22,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 3,
+            field adc-temp 23:0,
+        },
+    },
+    /// Raw (uncompensated) humidity ADC reading.
+    register Humidity {
+        address: 0x25,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 2,
+            field adc-hum 15:0,
+        },
+    },
+    /// Raw gas resistance ADC reading, together with its range and validity.
+    register GasResistance {
+        address: 0x2C,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 2,
+            field gas-range 3:0,
+            field heat-stab 4,
+            field gas-valid 5,
+            field adc-gas-res 15:6,
+        },
+    },
+
+    // --- Heater profiles (10 profiles, index 0-9) ---------------------------
+
+    /// Read-back of the heater current DAC value used for each profile.
+    register IdacHeat[10 stride 1] {
+        address: 0x50,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0,
+        },
+    },
+    /// Target heater resistance for each of the 10 heater profiles.
+    register ResHeat[10 stride 1] {
+        address: 0x5A,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0,
+        },
+    },
+    /// Heater-on duration for each of the 10 heater profiles (encoded).
+    register GasWait[10 stride 1] {
+        address: 0x64,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 5:0,
+            field multiplier 7:6,
+        },
+    },
+    /// Shared heater duration used in parallel mode (encoded).
+    register SharedHeaterDuration {
+        address: 0x6E,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 5:0,
+            field multiplier 7:6,
+        },
+    },
+
+    // --- Calibration coefficients --------------------------------------------
+    // These map directly to the `par_*` fields of `bme69x_calib_data` in the
+    // reference driver. Compensation math is intentionally left out of the
+    // DSL and should be implemented in Rust using Bosch's published formulas.
+
+    /// Temperature compensation coefficient T1.
+    register ParT1 {
+        address: 0xE9,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 2,
+            byte-order: LE,
+            field value 15:0,
+        },
+    },
+    /// Temperature compensation coefficient T2.
+    register ParT2 {
+        address: 0x8A,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 2,
+            byte-order: LE,
+            field value 15:0,
+        },
+    },
+    /// Temperature compensation coefficient T3.
+    register ParT3 {
+        address: 0x8C,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0 -> i8,
+        },
+    },
+
+    /// Pressure compensation coefficient P1.
+    register ParP1 {
+        address: 0x94,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 2,
+            byte-order: LE,
+            field value 15:0,
+        },
+    },
+    /// Pressure compensation coefficient P2.
+    register ParP2 {
+        address: 0x96,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 2,
+            byte-order: LE,
+            field value 15:0,
+        },
+    },
+    /// Pressure compensation coefficient P3.
+    register ParP3 {
+        address: 0x98,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0 -> i8,
+        },
+    },
+    /// Pressure compensation coefficient P4.
+    register ParP4 {
+        address: 0x99,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0 -> i8,
+        },
+    },
+    /// Pressure compensation coefficient P5.
+    register ParP5 {
+        address: 0x8E,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 2,
+            byte-order: LE,
+            field value 15:0 -> i16,
+        },
+    },
+    /// Pressure compensation coefficient P6.
+    register ParP6 {
+        address: 0x90,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 2,
+            byte-order: LE,
+            field value 15:0 -> i16,
+        },
+    },
+    /// Pressure compensation coefficient P7.
+    register ParP7 {
+        address: 0x92,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0 -> i8,
+        },
+    },
+    /// Pressure compensation coefficient P8.
+    register ParP8 {
+        address: 0x93,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0 -> i8,
+        },
+    },
+    /// Pressure compensation coefficient P9.
+    register ParP9 {
+        address: 0x9C,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 2,
+            byte-order: LE,
+            field value 15:0 -> i16,
+        },
+    },
+    /// Pressure compensation coefficient P10.
+    register ParP10 {
+        address: 0x9E,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0 -> i8,
+        },
+    },
+    /// Pressure compensation coefficient P11.
+    register ParP11 {
+        address: 0x9F,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0 -> i8,
+        },
+    },
+
+    /// Humidity compensation coefficients H1 and H5.
+    ///
+    /// These two 12-bit signed values share a nibble of the middle byte:
+    /// `0xE1` holds the top 8 bits of H5, `0xE3` holds the top 8 bits of H1,
+    /// and `0xE2` holds the low nibble of H5 (upper) and H1 (lower).
+    register ParH1ParH5 {
+        address: 0xE1,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 3,
+            field par-h1 11:0 -> i16,
+            field par-h5 23:12 -> i16,
+        },
+    },
+    /// Humidity compensation coefficient H2.
+    register ParH2 {
+        address: 0xE4,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0 -> i8,
+        },
+    },
+    /// Humidity compensation coefficient H3.
+    register ParH3 {
+        address: 0xE6,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0,
+        },
+    },
+    /// Humidity compensation coefficient H4.
+    register ParH4 {
+        address: 0xE5,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0 -> i8,
+        },
+    },
+    /// Humidity compensation coefficient H6.
+    register ParH6 {
+        address: 0xE7,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0,
+        },
+    },
+
+    /// Gas heater compensation coefficient G1.
+    register ParG1 {
+        address: 0xED,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0 -> i8,
+        },
+    },
+    /// Gas heater compensation coefficient G2.
+    register ParG2 {
+        address: 0xEB,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 2,
+            byte-order: LE,
+            field value 15:0 -> i16,
+        },
+    },
+    /// Gas heater compensation coefficient G3.
+    register ParG3 {
+        address: 0xEE,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0 -> i8,
+        },
+    },
+
+    /// Heater resistance calibration value.
+    register ResHeatVal {
+        address: 0x00,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:0 -> i8,
+        },
+    },
+    /// Heater resistance range calibration value.
+    register ResHeatRange {
+        address: 0x02,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 5:4,
+        },
+    },
+    /// Gas resistance range switching error calibration value.
+    register RangeSwErr {
+        address: 0x04,
+        access: RO,
+        fields: fieldset _ {
+            size-bytes: 1,
+            field value 7:4 -> i8,
+        },
+    },
+}
