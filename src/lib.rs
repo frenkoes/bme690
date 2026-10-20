@@ -52,7 +52,7 @@ where
         }
     }
 
-    /// Initializes the BME690 sensor.
+    /// Initializes the BME690 sensor to use Forced mode with the default settings.
     ///
     /// # Returns
     ///
@@ -74,8 +74,8 @@ where
             .write(|reg| reg.set_filter(Filter::Off))?;
         self.device.ctrl_meas().write(|reg| {
             reg.set_osrs_t(Oversampling::X2);
-            reg.set_osrs_p(Oversampling::X4);
-            reg.set_mode(Mode::Sleep);
+            reg.set_osrs_p(Oversampling::X16);
+            reg.set_mode(Mode::Forced);
         })?;
 
         self.calibration = CalibrationData::read(&mut self.device)?;

@@ -6,9 +6,36 @@
 // Bosch's official `BME690_SensorAPI` reference driver (`bme69x.c`,
 // BSD-3-Clause), https://github.com/boschsensortec/BME690_SensorAPI.
 
-use crate::registers::Bme690 as Device;
+use crate::registers::{Bme690 as Device, Filter, Mode, Oversampling};
 use device_driver::RegisterInterface;
 
+#[derive(Debug, Clone, Copy)]
+pub struct Config {
+    pub mode: Mode,
+    pub oversampling_temperature: Oversampling,
+    pub oversampling_pressure: Oversampling,
+    pub oversampling_humidity: Oversampling,
+    pub filter_coefficient: Filter,
+    pub gas_heater_temperature: u16,
+    pub gas_heater_duration: u16,
+    pub gas_heater_enabled: bool,
+}
+
+/// Default configuration values for the BME690 sensor. Using forced mode.  
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            mode: Mode::Sleep,
+            oversampling_temperature: Oversampling::X2,
+            oversampling_pressure: Oversampling::X16,
+            oversampling_humidity: Oversampling::X1,
+            filter_coefficient: Filter::Off,
+            gas_heater_temperature: 320, // °C
+            gas_heater_duration: 150,    // ms
+            gas_heater_enabled: true,
+        }
+    }
+}
 /// Calibration coefficients read once from the sensor at [`init`](crate::Bme690::init) time.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct CalibrationData {
