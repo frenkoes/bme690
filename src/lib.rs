@@ -9,23 +9,21 @@ mod registers;
 use crate::config::{CalibrationData, compensate_gas_resistance, encode_gas_wait, encode_res_heat};
 use crate::error::Error;
 use crate::interface::I2cInterface;
-use crate::registers::{Bme690 as Device, Filter, Mode, Oversampling};
+use crate::registers::{Bme690 as Device, Mode};
 use embedded_hal::{delay::DelayNs, i2c::I2c};
+
+pub use crate::config::Config;
 
 /// Expected value of the `chip_id` register.
 const CHIP_ID: u8 = 0x61;
 /// Ambient temperature (degrees Celsius) assumed for the heater calculation
 /// before a first temperature reading is available.
 const DEFAULT_AMBIENT_TEMP_C: i8 = 25;
-/// Default heater target temperature in degrees Celsius.
-const DEFAULT_HEATER_TEMP_C: u16 = 300;
-/// Default heater-on duration in milliseconds.
-const DEFAULT_HEATER_DURATION_MS: u16 = 100;
-
 pub struct Bme690<I2C, D> {
     device: Device<I2cInterface<I2C>>,
     delay: D,
     calibration: CalibrationData,
+    config: Config,
 }
 
 impl<I2C, D> Bme690<I2C, D>
@@ -45,10 +43,16 @@ where
     ///
     /// * `Self` - A new instance of the Bme690 driver.
     pub fn new(i2c: I2C, address: u8, delay: D) -> Bme690<I2C, D> {
+        Self::new_with_config(i2c, address, delay, Config::default())
+    }
+
+    /// Creates a new driver with the provided measurement configuration.
+    pub fn new_with_config(i2c: I2C, address: u8, delay: D, config: Config) -> Bme690<I2C, D> {
         Bme690 {
             device: Device::new(I2cInterface::new(i2c, address)),
             delay,
             calibration: CalibrationData::default(),
+            config,
         }
     }
 
@@ -68,30 +72,41 @@ where
 
         self.device
             .ctrl_hum()
-            .write(|reg| reg.set_osrs_h(Oversampling::X1))?;
+            .write(|reg| reg.set_osrs_h(self.config.oversampling_humidity))?;
         self.device
             .config()
-            .write(|reg| reg.set_filter(Filter::Off))?;
+            .write(|reg| reg.set_filter(self.config.filter_coefficient))?;
         self.device.ctrl_meas().write(|reg| {
-            reg.set_osrs_t(Oversampling::X2);
-            reg.set_osrs_p(Oversampling::X16);
-            reg.set_mode(Mode::Forced);
+            reg.set_osrs_t(self.config.oversampling_temperature);
+            reg.set_osrs_p(self.config.oversampling_pressure);
+            reg.set_mode(self.config.mode);
+        })?;
+        self.device
+            .ctrl_gas_0()
+            .write(|reg| reg.set_heat_off(!self.config.gas_heater_enabled))?;
+        self.device.ctrl_gas_1().write(|reg| {
+            reg.set_nb_conv(self.config.gas_heater_profile.min(9));
+            reg.set_run_gas(self.config.gas_heater_enabled);
         })?;
 
         self.calibration = CalibrationData::read(&mut self.device)?;
 
         let res_heat = encode_res_heat(
-            DEFAULT_HEATER_TEMP_C,
+            self.config.gas_heater_temperature,
             DEFAULT_AMBIENT_TEMP_C,
             &self.calibration,
         );
-        let gas_wait = encode_gas_wait(DEFAULT_HEATER_DURATION_MS);
+        let gas_wait = encode_gas_wait(self.config.gas_heater_duration);
         self.device
             .res_heat()
-            .write_at(0, |reg| reg.set_value(res_heat))?;
+            .write_at(self.config.gas_heater_profile.min(9).into(), |reg| {
+                reg.set_value(res_heat)
+            })?;
         self.device
             .gas_wait()
-            .write_at(0, |reg| reg.set_value(gas_wait))?;
+            .write_at(self.config.gas_heater_profile.min(9).into(), |reg| {
+                reg.set_value(gas_wait)
+            })?;
 
         Ok(())
     }
@@ -103,8 +118,8 @@ where
     /// * `Result<SensorData, Error>` - Ok(SensorData) containing the sensor data, or an Error if it failed.
     pub fn read_sensor_data(&mut self) -> Result<SensorData, Error<I2C::Error>> {
         self.device.ctrl_gas_1().write(|reg| {
-            reg.set_nb_conv(0);
-            reg.set_run_gas(true);
+            reg.set_nb_conv(self.config.gas_heater_profile.min(9));
+            reg.set_run_gas(self.config.gas_heater_enabled);
         })?;
         self.device
             .ctrl_meas()

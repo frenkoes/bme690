@@ -19,20 +19,22 @@ pub struct Config {
     pub gas_heater_temperature: u16,
     pub gas_heater_duration: u16,
     pub gas_heater_enabled: bool,
+    pub gas_heater_profile: u8,
 }
 
-/// Default configuration values for the BME690 sensor. Using forced mode.  
+/// Default configuration values for a forced BME690 measurement.
 impl Default for Config {
     fn default() -> Self {
         Self {
-            mode: Mode::Sleep,
+            mode: Mode::Forced,
             oversampling_temperature: Oversampling::X2,
             oversampling_pressure: Oversampling::X16,
             oversampling_humidity: Oversampling::X1,
             filter_coefficient: Filter::Off,
-            gas_heater_temperature: 320, // °C
-            gas_heater_duration: 150,    // ms
+            gas_heater_temperature: 320,
+            gas_heater_duration: 150,
             gas_heater_enabled: true,
+            gas_heater_profile: 0,
         }
     }
 }
@@ -231,8 +233,6 @@ pub(crate) fn encode_res_heat(
 ) -> u8 {
     let target_temp_c = target_temp_c.min(400) as i64;
 
-    // Widened to i64 to match the reference driver, which relies on a `ULL`
-    // literal to force 64-bit arithmetic here and avoid i32 overflow.
     let var1 = ((ambient_temp_c as i64 * calib.par_g3 as i64) / 1000) * 256;
     let var2 = (calib.par_g1 as i64 + 784)
         * (((calib.par_g2 as i64 + 154_009) * target_temp_c * 5 / 100) + 3_276_800)
