@@ -7,7 +7,7 @@
 // BSD-3-Clause), https://github.com/boschsensortec/BME690_SensorAPI.
 
 use crate::registers::{Bme690 as Device, Filter, Mode, Oversampling};
-use device_driver::RegisterInterface;
+use device_driver::AsyncRegisterInterface;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
@@ -85,39 +85,39 @@ pub struct CalibrationData {
 
 impl CalibrationData {
     /// Reads all calibration coefficients from the device.
-    pub(crate) fn read<I>(device: &mut Device<I>) -> Result<Self, I::Error>
+    pub(crate) async fn read_async<I>(device: &mut Device<I>) -> Result<Self, I::Error>
     where
-        I: RegisterInterface<AddressType = u8>,
+        I: AsyncRegisterInterface<AddressType = u8>,
     {
         let (par_h1, par_h5) =
-            decode_humidity_calibration(device.par_h_1_par_h_5().read()?.value());
+            decode_humidity_calibration(device.par_h_1_par_h_5().read_async().await?.value());
 
         Ok(Self {
-            par_t1: device.par_t_1().read()?.value(),
-            par_t2: device.par_t_2().read()?.value(),
-            par_t3: device.par_t_3().read()?.value(),
-            par_p1: device.par_p_1().read()?.value(),
-            par_p2: device.par_p_2().read()?.value(),
-            par_p3: device.par_p_3().read()?.value(),
-            par_p4: device.par_p_4().read()?.value(),
-            par_p5: device.par_p_5().read()?.value(),
-            par_p6: device.par_p_6().read()?.value(),
-            par_p7: device.par_p_7().read()?.value(),
-            par_p8: device.par_p_8().read()?.value(),
-            par_p9: device.par_p_9().read()?.value(),
-            par_p10: device.par_p_10().read()?.value(),
-            par_p11: device.par_p_11().read()?.value(),
+            par_t1: device.par_t_1().read_async().await?.value(),
+            par_t2: device.par_t_2().read_async().await?.value(),
+            par_t3: device.par_t_3().read_async().await?.value(),
+            par_p1: device.par_p_1().read_async().await?.value(),
+            par_p2: device.par_p_2().read_async().await?.value(),
+            par_p3: device.par_p_3().read_async().await?.value(),
+            par_p4: device.par_p_4().read_async().await?.value(),
+            par_p5: device.par_p_5().read_async().await?.value(),
+            par_p6: device.par_p_6().read_async().await?.value(),
+            par_p7: device.par_p_7().read_async().await?.value(),
+            par_p8: device.par_p_8().read_async().await?.value(),
+            par_p9: device.par_p_9().read_async().await?.value(),
+            par_p10: device.par_p_10().read_async().await?.value(),
+            par_p11: device.par_p_11().read_async().await?.value(),
             par_h1,
             par_h5,
-            par_h2: device.par_h_2().read()?.value(),
-            par_h3: device.par_h_3().read()?.value(),
-            par_h4: device.par_h_4().read()?.value(),
-            par_h6: device.par_h_6().read()?.value(),
-            par_g1: device.par_g_1().read()?.value(),
-            par_g2: device.par_g_2().read()?.value(),
-            par_g3: device.par_g_3().read()?.value(),
-            res_heat_range: device.res_heat_range().read()?.value(),
-            res_heat_val: device.res_heat_val().read()?.value(),
+            par_h2: device.par_h_2().read_async().await?.value(),
+            par_h3: device.par_h_3().read_async().await?.value(),
+            par_h4: device.par_h_4().read_async().await?.value(),
+            par_h6: device.par_h_6().read_async().await?.value(),
+            par_g1: device.par_g_1().read_async().await?.value(),
+            par_g2: device.par_g_2().read_async().await?.value(),
+            par_g3: device.par_g_3().read_async().await?.value(),
+            res_heat_range: device.res_heat_range().read_async().await?.value(),
+            res_heat_val: device.res_heat_val().read_async().await?.value(),
         })
     }
 

@@ -6,6 +6,6 @@ edition = "2024"
 [dependencies]
 embedded-hal = "1.0.0"
 device-driver = { version = "2.1.0", default-features = false, features = [
-	"macros",
+  "macros",
 ] }
 embedded-hal-async = "1.0.0"
