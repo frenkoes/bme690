@@ -1,5 +1,5 @@
 // src/error.rs
-use embedded_hal::i2c::Error as I2CError;
+use embedded_hal_async::i2c::Error as I2CError;
 /// Custom error enum for the BME690 Rust driver.
 #[derive(Debug)]
 pub enum Error<E> {

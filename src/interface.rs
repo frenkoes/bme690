@@ -1,44 +1,13 @@
 // src/interface.rs
-// I2C register interface glue between `embedded-hal` and the generated
+// I2C register interface glue between `embedded-hal-async` and the generated
 // `device-driver` register definitions in `registers.rs`.
 
 use device_driver::{AsyncRegisterInterface, FieldsetMetadata, RegisterInterfaceBase};
-use embedded_hal::i2c::{ErrorType, I2c};
-use embedded_hal_async::i2c::I2c as AsyncI2c;
+use embedded_hal_async::i2c::{ErrorType, I2c as AsyncI2c};
 
 /// Maximum register size (in bytes) used anywhere in `bme690.ddsl`.
 /// Only used to size the stack buffer for combined address+data writes.
 const MAX_REGISTER_LEN: usize = 3;
-
-pub(crate) struct BlockingAsync<T>(pub(crate) T);
-
-impl<T: ErrorType> ErrorType for BlockingAsync<T> {
-    type Error = T::Error;
-}
-
-impl<T: I2c> AsyncI2c for BlockingAsync<T> {
-    async fn transaction(
-        &mut self,
-        address: u8,
-        operations: &mut [embedded_hal::i2c::Operation<'_>],
-    ) -> Result<(), Self::Error> {
-        self.0.transaction(address, operations)
-    }
-}
-
-impl<T: embedded_hal::delay::DelayNs> embedded_hal_async::delay::DelayNs for BlockingAsync<T> {
-    async fn delay_ns(&mut self, ns: u32) {
-        self.0.delay_ns(ns);
-    }
-
-    async fn delay_us(&mut self, us: u32) {
-        self.0.delay_us(us);
-    }
-
-    async fn delay_ms(&mut self, ms: u32) {
-        self.0.delay_ms(ms);
-    }
-}
 
 pub struct I2cInterface<I2C> {
     pub(crate) i2c: I2C,

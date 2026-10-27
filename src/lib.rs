@@ -8,30 +8,14 @@ mod registers;
 
 use crate::config::{CalibrationData, compensate_gas_resistance, encode_gas_wait, encode_res_heat};
 use crate::error::Error;
-use crate::interface::{BlockingAsync, I2cInterface};
+use crate::interface::I2cInterface;
 use crate::registers::{Bme690 as Device, Mode};
-use core::{
-    future::Future,
-    pin::pin,
-    task::{Context, Poll, Waker},
-};
 use embedded_hal_async::{delay::DelayNs, i2c::I2c};
 
 pub use crate::config::Config;
 
 /// Compatibility name for the asynchronous driver.
 pub type AsyncBme690<I2C, D> = Bme690<I2C, D>;
-
-fn block_on<F: Future>(future: F) -> F::Output {
-    let mut future = pin!(future);
-    let mut context = Context::from_waker(Waker::noop());
-    loop {
-        match future.as_mut().poll(&mut context) {
-            Poll::Ready(output) => return output,
-            Poll::Pending => core::hint::spin_loop(),
-        }
-    }
-}
 
 /// Expected value of the `chip_id` register.
 const CHIP_ID: u8 = 0x61;
@@ -285,72 +269,6 @@ where
             gas_index,
             meas_index: self.device.meas_index().read_async().await?.value(),
         })
-    }
-}
-
-/// Blocking BME690 driver backed by the asynchronous implementation.
-///
-/// Accepts blocking `embedded-hal` peripherals and runs each operation with a
-/// private, `core`-only `block_on`, without an executor or heap allocation.
-pub struct BlockingBme690<I2C, D> {
-    inner: Bme690<BlockingAsync<I2C>, BlockingAsync<D>>,
-}
-
-impl<I2C, D> BlockingBme690<I2C, D>
-where
-    I2C: embedded_hal::i2c::I2c,
-    D: embedded_hal::delay::DelayNs,
-{
-    /// Creates a blocking driver with the default configuration.
-    pub fn new(i2c: I2C, address: u8, delay: D) -> Self {
-        Self::new_with_config(i2c, address, delay, Config::default())
-    }
-
-    /// Creates a blocking driver with the provided measurement configuration.
-    pub fn new_with_config(i2c: I2C, address: u8, delay: D, config: Config) -> Self {
-        Self {
-            inner: Bme690::new_with_config(
-                BlockingAsync(i2c),
-                address,
-                BlockingAsync(delay),
-                config,
-            ),
-        }
-    }
-
-    /// Initializes the BME690 sensor.
-    pub fn init(&mut self) -> Result<(), Error<I2C::Error>> {
-        block_on(self.inner.init())
-    }
-
-    /// Reads temperature in units of 0.01 degrees Celsius.
-    pub fn read_temperature(&mut self) -> Result<i16, Error<I2C::Error>> {
-        block_on(self.inner.read_temperature())
-    }
-
-    /// Reads gas resistance in ohms.
-    pub fn read_gas(&mut self) -> Result<u32, Error<I2C::Error>> {
-        block_on(self.inner.read_gas())
-    }
-
-    /// Reads pressure in Pascal.
-    pub fn read_pressure(&mut self) -> Result<u32, Error<I2C::Error>> {
-        block_on(self.inner.read_pressure())
-    }
-
-    /// Reads relative humidity in units of 0.001 %RH.
-    pub fn read_humidity(&mut self) -> Result<u32, Error<I2C::Error>> {
-        block_on(self.inner.read_humidity())
-    }
-
-    /// Reads status flags and measurement indices from the latest conversion.
-    pub fn read_status(&mut self) -> Result<SensorStatus, Error<I2C::Error>> {
-        block_on(self.inner.read_status())
-    }
-
-    /// Reads all sensor data from one BME690 conversion.
-    pub fn read_sensor_data(&mut self) -> Result<SensorData, Error<I2C::Error>> {
-        block_on(self.inner.read_sensor_data())
     }
 }
 
