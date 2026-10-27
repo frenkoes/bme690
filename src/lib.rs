@@ -91,42 +91,101 @@ where
 
         self.calibration = CalibrationData::read(&mut self.device)?;
 
-        let res_heat = encode_res_heat(
-            self.config.gas_heater_temperature,
-            DEFAULT_AMBIENT_TEMP_C,
-            &self.calibration,
-        );
-        let gas_wait = encode_gas_wait(self.config.gas_heater_duration);
-        self.device
-            .res_heat()
-            .write_at(self.config.gas_heater_profile.min(9).into(), |reg| {
-                reg.set_value(res_heat)
-            })?;
-        self.device
-            .gas_wait()
-            .write_at(self.config.gas_heater_profile.min(9).into(), |reg| {
-                reg.set_value(gas_wait)
-            })?;
+        if self.config.gas_heater_enabled {
+            let res_heat = encode_res_heat(
+                self.config.gas_heater_temperature,
+                DEFAULT_AMBIENT_TEMP_C,
+                &self.calibration,
+            );
+            let gas_wait = encode_gas_wait(self.config.gas_heater_duration);
+            self.device
+                .res_heat()
+                .write_at(self.config.gas_heater_profile.min(9).into(), |reg| {
+                    reg.set_value(res_heat)
+                })?;
+            self.device
+                .gas_wait()
+                .write_at(self.config.gas_heater_profile.min(9).into(), |reg| {
+                    reg.set_value(gas_wait)
+                })?;
+        }
 
         Ok(())
     }
 
-    /// Reads sensor data from the BME690.
-    ///
-    /// # Returns
-    ///
-    /// * `Result<SensorData, Error>` - Ok(SensorData) containing the sensor data, or an Error if it failed.
+    /// Reads temperature in units of 0.01 degrees Celsius.
+    pub fn read_temperature(&mut self) -> Result<i16, Error<I2C::Error>> {
+        self.start_measurement()?;
+        self.read_temperature_value()
+    }
+
+    /// Reads gas resistance in ohms.
+    pub fn read_gas(&mut self) -> Result<u32, Error<I2C::Error>> {
+        self.start_measurement()?;
+        self.read_gas_value()
+    }
+
+    /// Reads pressure in Pascal.
+    pub fn read_pressure(&mut self) -> Result<u32, Error<I2C::Error>> {
+        self.start_measurement()?;
+        self.read_pressure_value()
+    }
+
+    /// Reads relative humidity in units of 0.001 %RH.
+    pub fn read_humidity(&mut self) -> Result<u32, Error<I2C::Error>> {
+        self.start_measurement()?;
+        self.read_humidity_value()
+    }
+
+    /// Reads status flags and measurement indices from the latest conversion.
+    pub fn read_status(&mut self) -> Result<SensorStatus, Error<I2C::Error>> {
+        let (new_data, gas_index) = self.start_measurement()?;
+        self.read_status_value(new_data, gas_index)
+    }
+
+    /// Reads all sensor data from one BME690 conversion.
     pub fn read_sensor_data(&mut self) -> Result<SensorData, Error<I2C::Error>> {
-        self.device.ctrl_gas_1().write(|reg| {
-            reg.set_nb_conv(self.config.gas_heater_profile.min(9));
-            reg.set_run_gas(self.config.gas_heater_enabled);
-        })?;
+        let (new_data, gas_index) = self.start_measurement()?;
+
+        let status = self.read_status_value(new_data, gas_index)?;
+        let temperature = self.read_temperature_value()?;
+        let pressure = self.read_pressure_value()?;
+        let humidity = self.read_humidity_value()?;
+        let gas_resistance = self.read_gas_value()?;
+
+        Ok(SensorData {
+            status: status.status,
+            gas_index: status.gas_index,
+            meas_index: status.meas_index,
+            temperature,
+            pressure,
+            humidity,
+            gas_resistance,
+        })
+    }
+
+    fn start_measurement(&mut self) -> Result<(bool, u8), Error<I2C::Error>> {
+        if self.config.gas_heater_enabled {
+            self.device
+                .ctrl_gas_0()
+                .write(|reg| reg.set_heat_off(false))?;
+            self.device.ctrl_gas_1().write(|reg| {
+                reg.set_nb_conv(self.config.gas_heater_profile.min(9));
+                reg.set_run_gas(true);
+            })?;
+        } else {
+            self.device
+                .ctrl_gas_0()
+                .write(|reg| reg.set_heat_off(true))?;
+            self.device
+                .ctrl_gas_1()
+                .write(|reg| reg.set_run_gas(false))?;
+        }
         self.device
             .ctrl_meas()
             .modify(|reg| reg.set_mode(Mode::Forced))?;
 
-        // Wait for the temperature/pressure/humidity oversampling and the gas
-        // heater conversion to complete, then poll for new data.
+        // Wait for oversampling and, when enabled, the gas heater conversion.
         self.delay.delay_ms(150);
         let mut status = self.device.eas_status_0().read()?;
         let mut tries = 5;
@@ -139,30 +198,63 @@ where
             return Err(Error::ReadingTimeout);
         }
 
+        Ok((status.new_data(), status.gas_meas_index()))
+    }
+
+    fn read_temperature_value(&mut self) -> Result<i16, Error<I2C::Error>> {
+        let adc_temp = self.device.temperature().read()?.adc_temp();
+        let (temperature, _) = self.calibration.compensate_temperature(adc_temp);
+        Ok(temperature)
+    }
+
+    fn read_pressure_value(&mut self) -> Result<u32, Error<I2C::Error>> {
         let adc_pres = self.device.pressure().read()?.adc_pres();
         let adc_temp = self.device.temperature().read()?.adc_temp();
+        let (_, t_lin) = self.calibration.compensate_temperature(adc_temp);
+        Ok(self.calibration.compensate_pressure(adc_pres, t_lin))
+    }
+
+    fn read_humidity_value(&mut self) -> Result<u32, Error<I2C::Error>> {
         let adc_hum = self.device.humidity().read()?.adc_hum();
+        let adc_temp = self.device.temperature().read()?.adc_temp();
+        let (temperature, _) = self.calibration.compensate_temperature(adc_temp);
+        Ok(self.calibration.compensate_humidity(adc_hum, temperature))
+    }
+
+    fn read_gas_value(&mut self) -> Result<u32, Error<I2C::Error>> {
         let gas = self.device.gas_resistance().read()?;
+        Ok(compensate_gas_resistance(
+            gas.adc_gas_res(),
+            gas.gas_range(),
+        ))
+    }
 
-        let (temperature, t_lin) = self.calibration.compensate_temperature(adc_temp);
-        let pressure = self.calibration.compensate_pressure(adc_pres, t_lin);
-        let humidity = self.calibration.compensate_humidity(adc_hum, temperature);
-        let gas_resistance = compensate_gas_resistance(gas.adc_gas_res(), gas.gas_range());
-
-        let status_byte = ((status.new_data() as u8) << 7)
+    fn read_status_value(
+        &mut self,
+        new_data: bool,
+        gas_index: u8,
+    ) -> Result<SensorStatus, Error<I2C::Error>> {
+        let gas = self.device.gas_resistance().read()?;
+        let status_byte = ((new_data as u8) << 7)
             | ((gas.gas_valid() as u8) << 5)
             | ((gas.heat_stab() as u8) << 4);
 
-        Ok(SensorData {
+        Ok(SensorStatus {
             status: status_byte,
-            gas_index: status.gas_meas_index(),
+            gas_index,
             meas_index: self.device.meas_index().read()?.value(),
-            temperature,
-            pressure,
-            humidity,
-            gas_resistance,
         })
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SensorStatus {
+    /// Contains new_data, gas_valid and heat_stab flags.
+    pub status: u8,
+    /// Index of the heater profile used.
+    pub gas_index: u8,
+    /// Measurement index.
+    pub meas_index: u8,
 }
 
 #[derive(Debug)]
@@ -179,6 +271,6 @@ pub struct SensorData {
     pub pressure: u32,
     /// Relative humidity in units of 0.001 %RH.
     pub humidity: u32,
-    /// Gas resistance in milliohm.
+    /// Gas resistance in ohms.
     pub gas_resistance: u32,
 }

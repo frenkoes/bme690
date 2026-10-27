@@ -33,11 +33,26 @@ impl Default for Config {
             filter_coefficient: Filter::Off,
             gas_heater_temperature: 320,
             gas_heater_duration: 150,
-            gas_heater_enabled: true,
+            gas_heater_enabled: false,
             gas_heater_profile: 0,
         }
     }
 }
+
+fn decode_humidity_calibration(raw: u32) -> (i16, i16) {
+    let par_h1 = (((raw & 0xff) << 4) | ((raw >> 8) & 0x0f)) as u16;
+    let par_h5 = ((raw >> 12) & 0x0fff) as u16;
+    (sign_extend_12bit(par_h1), sign_extend_12bit(par_h5))
+}
+
+fn sign_extend_12bit(value: u16) -> i16 {
+    if value & 0x0800 != 0 {
+        value as i16 - 0x1000
+    } else {
+        value as i16
+    }
+}
+
 /// Calibration coefficients read once from the sensor at [`init`](crate::Bme690::init) time.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct CalibrationData {
@@ -74,7 +89,8 @@ impl CalibrationData {
     where
         I: RegisterInterface<AddressType = u8>,
     {
-        let par_h1_h5 = device.par_h_1_par_h_5().read()?;
+        let (par_h1, par_h5) =
+            decode_humidity_calibration(device.par_h_1_par_h_5().read()?.value());
 
         Ok(Self {
             par_t1: device.par_t_1().read()?.value(),
@@ -91,8 +107,8 @@ impl CalibrationData {
             par_p9: device.par_p_9().read()?.value(),
             par_p10: device.par_p_10().read()?.value(),
             par_p11: device.par_p_11().read()?.value(),
-            par_h1: par_h1_h5.par_h_1(),
-            par_h5: par_h1_h5.par_h_5(),
+            par_h1,
+            par_h5,
             par_h2: device.par_h_2().read()?.value(),
             par_h3: device.par_h_3().read()?.value(),
             par_h4: device.par_h_4().read()?.value(),
@@ -198,7 +214,21 @@ impl CalibrationData {
     }
 }
 
-/// Compensates a raw gas resistance ADC reading. Returns the resistance in milliohm.
+#[cfg(test)]
+mod tests {
+    use super::decode_humidity_calibration;
+
+    #[test]
+    fn decodes_humidity_coefficients_and_signs() {
+        let raw = (0x12 << 16) | (0x34 << 8) | 0x56;
+        assert_eq!(decode_humidity_calibration(raw), (0x564, 0x123));
+
+        let raw = (0xf8 << 16) | (0x0f << 8) | 0x80;
+        assert_eq!(decode_humidity_calibration(raw), (-2033, -128));
+    }
+}
+
+/// Compensates a raw gas resistance ADC reading. Returns the resistance in ohms.
 pub(crate) fn compensate_gas_resistance(gas_res_adc: u16, gas_range: u8) -> u32 {
     let var1 = 262_144u32 >> gas_range;
     let var2 = (gas_res_adc as i32 - 512) * 3 + 4096;
